@@ -36,7 +36,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from trigger_env import TRAIN_MISSIONS, TriggerEnv, split_missions
+from trigger_env import TRAIN_MISSIONS, TriggerEnv, RewardTriggerEnv, split_missions
 
 TRAINING_DIR = Path(__file__).resolve().parent / "training"
 LOGS_DIR = TRAINING_DIR / "logs"                 # one sub-folder per run
@@ -96,6 +96,8 @@ def train_ppo(env, timesteps: int, logger):
     return model.learn(total_timesteps=timesteps)
 
 
+
+
 def train_a2c(env, timesteps: int, logger):
     """A2C: simpler on-policy actor-critic (tuned settings)."""
     model = A2C("MlpPolicy", env, learning_rate=5e-4, n_steps=256, gamma=0.99, ent_coef=0.01,
@@ -114,6 +116,76 @@ def train_dqn(env, timesteps: int, logger):
     
     return model.learn(total_timesteps=timesteps)
 
+# ================================================================
+# Experiment 4: Reward-function sensitivity
+# ================================================================
+
+def make_reward_env(n_envs: int, log_dir: Path, lead_min: float, fp_penalty: float, fn_penalty: float):
+    """Create parallel RewardTriggerEnv instances with disjoint training missions."""
+    slices = split_missions(TRAIN_MISSIONS, n_envs)
+
+    fns = [
+        lambda i=i: Monitor(
+            RewardTriggerEnv(missions=slices[i], lead_min=lead_min, fp_penalty=fp_penalty, fn_penalty=fn_penalty),
+            filename=str(log_dir / str(i))
+        )
+        for i in range(n_envs)
+    ]
+
+    return SubprocVecEnv(fns) if n_envs > 1 else DummyVecEnv(fns)
+
+
+
+def train_reward_experiment(fp_penalty: float, fn_penalty: float, lead_min: float = 5,
+                            timesteps: int = 200_000, n_envs: int = 4, seed: int = 0):
+    """Train PPO using configurable reward penalties without modifying the original training workflow."""
+
+    if lead_min <= 0 or fp_penalty <= 0 or fn_penalty <= 0:
+        raise ValueError("lead_min, fp_penalty and fn_penalty must be positive")
+
+    if timesteps <= 0 or n_envs <= 0:
+        raise ValueError("timesteps and n_envs must be positive")
+
+    run = f"ppo_lead{lead_min:g}_fp{fp_penalty:g}_fn{fn_penalty:g}_seed{seed}"
+    log_dir = LOGS_DIR / run
+    model_path = SAVED_MODELS_DIR / f"trigger_{run}.zip"
+
+    # Prevent overwriting previous experiments
+    if model_path.exists() or log_dir.exists():
+        raise FileExistsError(f"Experiment '{run}' already exists. Use another seed or move old outputs.")
+
+    log_dir.mkdir(parents=True, exist_ok=False)
+    SAVED_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+
+    config = {
+        "algorithm": "ppo", "timesteps": timesteps, "n_envs": n_envs,
+        "seed": seed, "lead_min": lead_min,
+        "reward": "configurable_fp_fn_penalties",
+        "fp_penalty": fp_penalty, "fn_penalty": fn_penalty,
+        "observation_features": ["margin", "progress", "trend"]
+    }
+
+    with open(log_dir / "config.json", "w") as f:
+        json.dump(config, f, indent=4)
+
+    set_random_seed(seed)
+
+    env = None
+    try:
+        env = make_reward_env(n_envs, log_dir, lead_min, fp_penalty, fn_penalty)
+        env.action_space.seed(seed)
+        check_spaces("ppo", env)
+
+        logger = configure(str(log_dir), ["stdout", "csv"])
+        model = train_ppo(env, timesteps, logger)
+        model.save(str(model_path.with_suffix("")))
+
+    finally:
+        if env is not None:
+            env.close()
+
+    print(f"saved {model_path} | logs in {log_dir}")
+    return model_path
 
 TRAINERS = {"ppo": train_ppo, "a2c": train_a2c, "dqn": train_dqn}
 

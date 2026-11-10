@@ -25,12 +25,13 @@ framework, which is not needed here: the trigger never changes what the robots d
 | File | Purpose |
 |---|---|
 | `tarware_missions.py` | Runs one TA-RWARE mission with fixed execution rules and records every task: plan data, the robot's remaining-time reports, and the outcome. `python tarware_missions.py` prints a timing check |
-| `trigger_env.py` | `TriggerEnv`, the Gymnasium environment (observation, actions, reward); `evaluate()` and two baseline policies |
+| `trigger_env.py` | `TriggerEnv`, the Gymnasium environment (observation, actions, reward); `RewardTriggerEnv`, the same with configurable false-alarm and missed-warning penalties; `evaluate()` and two baseline policies |
 | `train_trigger.py` | Training with Stable-Baselines3: PPO, A2C or DQN, optionally on parallel environments |
 | `evaluate_trigger.py` | Evaluates trained models against `always WAIT` and `margin rule` on the same held-out missions |
 | `run_lead_experiments.sh`, `run_lead_evaluation.sh` | `LEAD_MIN` sweep (2–20): training, then evaluation at each warning horizon |
 | `analyze_first_report.py` | Earliest possible warning of each missed task (no model needed); outputs in `evaluation/first_report/` |
 | `experiment3_threshold.py`, `run_experiment3.sh` | Experiment 3: ALERT-probability threshold of a trained PPO, chosen on validation missions and tested on separate ones; outputs in `evaluation/experiment3/` |
+| `train_reward_experiment.py`, `run_experiment4.sh`, `evaluate_experiment4.py` | Experiment 4: PPO trained with different false-alarm / missed-warning penalties; outputs in `evaluation/experiment4/` |
 | `evaluation/results/` | Evaluation tables (CSV) |
 | `report/` | Experiment reports, figures and the scripts that draw them |
 | `training/logs/` | One sub-folder per training run (`<algo>_lead<L>_seed<seed>/`): the training table (`progress.csv`) and every episode's reward and length (`<i>.monitor.csv`) |
@@ -231,6 +232,14 @@ Missions are numbered (the number seeds the mission). Two sets are reserved and 
 - **Parallel training copies** each get one disjoint, bounded slice of `TRAIN_MISSIONS` (`split_missions`). No copy can reach the evaluation missions, whatever their number.
 - **`reset(seed=s)`** restarts at position `s` of the environment's range (Gymnasium convention), so the same seed always gives the same tasks.
 
+Slices of `EVAL_MISSIONS` used by the experiments (all disjoint):
+
+| Slice | Used by |
+|---|---|
+| `[0:50]` | Experiment 2 (`LEAD_MIN` sweep) and `evaluate_trigger.py` |
+| `[50:100]`, `[100:150]` | Experiment 3: validation, test |
+| `[150:200]`, `[200:250]` | Experiment 4: validation, test |
+
 ### Typical statistics (missions 0–39)
 
 | Measure | Value |
@@ -358,6 +367,16 @@ Decision threshold (Experiment 3): `bash run_experiment3.sh`. PPO alerts when it
 reaches a threshold (0.2–0.8). The threshold with the best timely recall under a false-alarm limit
 (`--max-far`, default 0.02) is chosen on `EVAL_MISSIONS[50:100]`, then tested once on
 `EVAL_MISSIONS[100:150]` against the default 0.5, the margin rule and always WAIT. No retraining.
+
+Reward penalties (Experiment 4): PPO with `LEAD_MIN` = 5 is trained with `RewardTriggerEnv`, which
+replaces the false-alarm and missed-warning penalties (R0 = 1 / 1, R1 = 2 / 1, R2 = 1 / 2, R3 = 2 / 2):
+```bash
+bash run_experiment4.sh          # trains R0, R2, R3
+python train_reward_experiment.py --fp-penalty 2 --fn-penalty 1   # trains R1
+python evaluate_experiment4.py --split validation   # or --split test
+```
+Models are saved as `trigger_ppo_lead5_fp<FP>_fn<FN>_seed0.zip`. The evaluation compares them with the
+margin rule and always WAIT; its "mean reward per task" uses the original penalties (1 / 1) for all.
 
 ---
 

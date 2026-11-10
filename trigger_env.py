@@ -140,6 +140,72 @@ class TriggerEnv(gym.Env):
         return features(task, self.k), 0.0, False, False, {} # ③ WAIT and more reports to come: reward 0, continue
 
 
+class RewardTriggerEnv(TriggerEnv):
+    """
+    Experiment 4: configurable reward penalties.
+
+    Inherits the original environment behavior:
+      - observations
+      - action space
+      - mission generation
+      - task selection
+      - termination logic
+
+    Changes only:
+      - false-positive penalty
+      - false-negative penalty
+    """
+
+    def __init__(
+        self,
+        missions=TRAIN_MISSIONS,
+        lead_min=LEAD_MIN,
+        fp_penalty=1.0,
+        fn_penalty=1.0,
+    ):
+        super().__init__(
+            missions=missions,
+            lead_min=lead_min,
+        )
+
+        self.fp_penalty = float(fp_penalty)
+        self.fn_penalty = float(fn_penalty)
+
+        if self.fp_penalty <= 0 or self.fn_penalty <= 0:
+            raise ValueError(
+                "Penalty magnitudes must be positive"
+            )
+
+    def step(self, action):
+        """
+        Preserve original transitions, then adjust
+        the terminal reward based on the outcome.
+        """
+
+        obs, reward, terminated, truncated, info = (
+            super().step(action)
+        )
+
+        if terminated or truncated:
+
+            missed = info.get("missed")
+            alerted = info.get("alert", False)
+
+            if alerted and missed is False:
+                reward = -self.fp_penalty
+
+            elif not alerted and missed is True:
+                reward = -self.fn_penalty
+
+        return (
+            obs,
+            float(reward),
+            terminated,
+            truncated,
+            info,
+        )
+
+
 def evaluate_tasks(policy, tasks,eval_lead_min: float = LEAD_MIN) -> dict:
     """Runs `policy` (observation -> 0/1) on every monitorable task of `tasks`; warning metrics.
     Tasks that cannot be monitored are counted, not hidden."""
