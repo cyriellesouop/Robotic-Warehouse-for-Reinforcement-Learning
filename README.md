@@ -30,6 +30,7 @@ framework, which is not needed here: the trigger never changes what the robots d
 | `evaluate_trigger.py` | Evaluates trained models against `always WAIT` and `margin rule` on the same held-out missions |
 | `run_lead_experiments.sh`, `run_lead_evaluation.sh` | `LEAD_MIN` sweep (2–20): training, then evaluation at each warning horizon |
 | `analyze_first_report.py` | Earliest possible warning of each missed task (no model needed); outputs in `evaluation/first_report/` |
+| `experiment3_threshold.py`, `run_experiment3.sh` | Experiment 3: ALERT-probability threshold of a trained PPO, chosen on validation missions and tested on separate ones; outputs in `evaluation/experiment3/` |
 | `evaluation/results/` | Evaluation tables (CSV) |
 | `report/` | Experiment reports, figures and the scripts that draw them |
 | `training/logs/` | One sub-folder per training run (`<algo>_lead<L>_seed<seed>/`): the training table (`progress.csv`) and every episode's reward and length (`<i>.monitor.csv`) |
@@ -352,6 +353,11 @@ saves `evaluation/results/lead_sensitivity_<n>missions_eval_lead<L>.csv` (or `--
 
 `LEAD_MIN` sweep: `bash run_lead_experiments.sh` (training), then `bash run_lead_evaluation.sh`
 (evaluation at horizons 2–20).
+
+Decision threshold (Experiment 3): `bash run_experiment3.sh`. PPO alerts when its ALERT probability
+reaches a threshold (0.2–0.8). The threshold with the best timely recall under a false-alarm limit
+(`--max-far`, default 0.02) is chosen on `EVAL_MISSIONS[50:100]`, then tested once on
+`EVAL_MISSIONS[100:150]` against the default 0.5, the margin rule and always WAIT. No retraining.
 
 ---
 
